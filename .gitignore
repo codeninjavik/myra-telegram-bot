@@ -1,0 +1,8 @@
+node_modules
+.env
+history.json
+modstate.json
+live-tokens.json
+gate.json
+myra.db
+myra.db-*

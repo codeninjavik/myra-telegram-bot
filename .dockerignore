@@ -1,0 +1,11 @@
+node_modules
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+history.json
+gate.json
+modstate.json
+live-tokens.json
+.git

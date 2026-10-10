@@ -1,0 +1,27 @@
+# Change "myra-live-bot" to a name nobody else on Fly.io has taken, and use the same name in PUBLIC_URL.
+app = "myra-live-bot"
+primary_region = "sin"
+
+[build]
+
+[env]
+  PORT = "8787"
+  LIVE_HOST = "0.0.0.0"
+  PUBLIC_URL = "https://myra-live-bot.fly.dev"
+
+# Persistent disk for myra.db, gate.json, history.json, modstate.json, live-tokens.json
+[[mounts]]
+  source = "myra_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
