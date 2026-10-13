@@ -1,0 +1,32 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+  command = "echo 'static page + functions only'"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
+  # Binaries and wasm files are shipped as-is next to the bundle (ffmpeg for voice notes, resvg for welcome banners).
+  external_node_modules = ["@ffmpeg-installer/linux-x64", "@resvg/resvg-wasm"]
+  included_files = ["node_modules/@ffmpeg-installer/linux-x64/**", "node_modules/@resvg/resvg-wasm/index_bg.wasm"]
+
+# /live/<token> is the static voice page; its JS reads the token from the URL.
+[[redirects]]
+  from = "/live/*"
+  to = "/live.html"
+  status = 200
+
+[[headers]]
+  for = "/live.html"
+  [headers.values]
+    Cache-Control = "no-store"
+    Referrer-Policy = "no-referrer"
+
+# SECRET AGENT Mini App (static, served from public/agent). Always revalidate so a deploy reaches players at once.
+[[headers]]
+  for = "/agent/*"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Referrer-Policy = "no-referrer"

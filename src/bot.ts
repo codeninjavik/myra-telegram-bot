@@ -1,31 +1,45 @@
 import { API_CONSTANTS, Bot, InlineKeyboard, InputFile } from "grammy";
-import { liveLink, startLive } from "./live.js";
-import { chatReply, hasGemini, speak, toOggOpus, transcribe } from "./ai.js";
+import { liveLink } from "./live.js";
+import { chatReply, hasGemini, learnAbout, speak, toOggOpus, transcribe } from "./ai.js";
 import { registerCommands } from "./commands.js";
-import { chatAllowed, registerGate } from "./gate.js";
+import { chatAllowed, loadGate, registerGate } from "./gate.js";
+import { delKey, getJSON, setJSON } from "./store.js";
 import { registerReferral } from "./referral.js";
+import { registerMarket } from "./market.js";
+import { registerDaily } from "./daily.js";
+import { registerModPlus } from "./modplus.js";
+import { registerExtras } from "./extras.js";
+import { registerToolMenu } from "./toolmenu.js";
+import { registerTools } from "./tools.js";
 import { registerStats } from "./stats.js";
-import { MOD_MENU, registerModeration } from "./moderation.js";
+import { GAME_MENU, registerGames } from "./games.js";
+import { AGENT_MENU, registerAgent } from "./agent/bot.js";
+import { MOD_MENU, isChatAdmin, registerModeration } from "./moderation.js";
 import { ANGRY, APP_INFO, APP_INTENT, BOT_WORDS, NICE_WORDS, pick } from "./persona.js";
 
-const token = process.env.BOT_TOKEN;
-if (!token) {
-  console.error("BOT_TOKEN missing. Copy .env.example to .env and set it.");
-  process.exit(1);
-}
+export const BOT_TOKEN = process.env.BOT_TOKEN;
+if (!BOT_TOKEN) console.error("BOT_TOKEN missing: set it in Netlify > Site configuration > Environment variables.");
 
-const bot = new Bot(token);
-const voiceMode = new Set<number>(); // chats where Myra always answers in voice
-const WANTS_VOICE = /\b(voice|audio|bol ke|bolo|sunao|awaaz|awaz|aawaz)\b/i;
+export const bot = new Bot(BOT_TOKEN ?? "missing-token");
+const WANTS_VOICE = /(voice|audio|bol ke|bolo|sunao|awaaz|awaz|aawaz)/i;
+
+// Chats where Myra always answers in voice ("/voice"). Stored per chat because functions keep no memory.
+const voiceOn = async (chatId: number) => (await getJSON<number>(`v/${chatId}`)) === 1;
+
+// Loaded first on every update: required-group list used by chatAllowed().
+bot.use(async (_ctx, next) => {
+  await loadGate();
+  await next();
+});
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function respond(ctx: any, text: string, asVoice: boolean) {
   const hint = asVoice ? "\nYe reply voice note mein bola jayega: emojis mat use karo, 1-2 chhote vaakya." : "";
   await ctx.replyWithChatAction(asVoice ? "record_voice" : "typing").catch(() => {});
-  const reply = await chatReply(ctx.chat.id, text, hint);
+  const reply = await chatReply(ctx.chat.id, text, hint, false, undefined, ctx.from?.id);
 
-  if (asVoice && hasGemini) {
+  if (asVoice && (await hasGemini())) {
     const wav = await speak(reply);
     if (wav) {
       const { data, name } = toOggOpus(wav);
@@ -55,8 +69,10 @@ async function handleText(ctx: any, text: string, fromVoice = false) {
   if (NICE_WORDS.test(text)) {
     await ctx.react(pick(["❤", "🥰", "😍", "👍"] as const)).catch(() => {});
   }
-  const asVoice = fromVoice || voiceMode.has(ctx.chat.id) || WANTS_VOICE.test(text);
+  const asVoice = fromVoice || WANTS_VOICE.test(text) || (await voiceOn(ctx.chat.id));
   await respond(ctx, text, asVoice);
+  // After the reply is out: every few messages Myra notes lasting facts about this person (see /memory, /forgetme).
+  if (ctx.from) await learnAbout(ctx.from.id, ctx.chat.id).catch((e: unknown) => console.error("learnAbout:", e));
 }
 
 // chatAllowed() is false in private chats, so DMs fall through to the Join/Verify gate instead of answering.
@@ -72,16 +88,15 @@ bot.command("voice", async (ctx, next) => {
   const id = ctx.chat.id;
   if (ctx.chat.type !== "private") {
     // One person flipping voice mode would change it for the whole group, so admins only.
-    const m = await ctx.getChatMember(ctx.from!.id).catch(() => null);
-    if (!m || (m.status !== "administrator" && m.status !== "creator")) {
+    if (!(await isChatAdmin(ctx, ctx.from!.id))) {
       return void (await ctx.reply("Group mein voice mode sirf admins badal sakte hain 😒. Tum bas 'myra voice mein bolo' likh do."));
     }
   }
-  if (voiceMode.has(id)) {
-    voiceMode.delete(id);
+  if (await voiceOn(id)) {
+    await delKey(`v/${id}`);
     await ctx.reply("Theek hai, ab text mein baat karenge 😊");
   } else {
-    voiceMode.add(id);
+    await setJSON(`v/${id}`, 1);
     await ctx.reply("Ab main voice note mein bolungi 🎙️😘");
   }
 });
@@ -89,29 +104,27 @@ bot.command("voice", async (ctx, next) => {
 registerStats(bot); // tracks users/groups for /stats; never blocks an update
 registerReferral(bot); // /start ref_ deep links, activity points, /refer /points /leaderboard
 registerGate(bot); // private chats get Join/Verify buttons instead of any reply
+registerAgent(bot); // SECRET AGENT Mini App entry points (/game, /joinroom ...)
+registerGames(bot); // /games /challenge /wallet /shop and the Stars payment handlers (after the gate)
 
 // /vc, /call too: a Telegram bot cannot join a group voice chat, so people talk to Myra live through this page.
 bot.command(["live", "livevoice", "vc", "voicechat", "call"], async (ctx, next) => {
   if (!chatAllowed(ctx)) return next();
-  const { url, public: isPublic } = liveLink(ctx.chat.id);
-  const text =
-    "🎙️ Myra se live baat karo: neeche wala button dabao, browser mein Myra ki screen khulegi aur mic se seedha baat kar sakte ho.\n" +
-    "(Group ke voice chat mein main join nahi kar sakti, isliye live baat yahan hoti hai.)";
-  try {
-    await ctx.reply(text, { reply_markup: new InlineKeyboard().url("🎙️ Live Voice Baat Karo", url) });
-  } catch {
-    // Telegram refuses localhost URLs on buttons, so send the plain link instead.
-    await ctx.reply(`${text}\n\n${url}`);
-  }
-  if (!isPublic) {
-    await ctx.reply(
-      "ℹ️ Ye button sirf us PC ke browser mein khulega jahan bot chal raha hai. Phone par kholne ke liye .env mein PUBLIC_URL (apna https tunnel/hosting URL) set karo.",
-    );
-  }
+  // The live page is opened from the private chat with Myra: there the Live Voice button shows up after Verify.
+  const dm = `https://t.me/${ctx.me.username}?start=live`;
+  await ctx.reply("🎙️ Live voice ke liye pehle Myra bot mein aao, wahan Live Voice ka button milega 👇", {
+    reply_markup: new InlineKeyboard().url("🎙️ Myra bot mein kholo", dm),
+  });
 });
 
+registerMarket(bot); // /price /chart /convert /alert
+registerExtras(bot); // /anime and the paper trading game
+registerToolMenu(bot); // /raw /id /info and the /tools buttons
 registerModeration(bot);
-const menu = registerCommands(bot);
+registerModPlus(bot); // captcha, antiraid, locks, blocklist, notes, filters, custom welcome
+registerDaily(bot); // /daily + message counting for top chatters (needs the moderation config loaded first)
+registerTools(bot); // /tr /stt /see and photo understanding
+const menu = [...registerCommands(bot), ...GAME_MENU.slice(0, 4), ...AGENT_MENU];
 
 bot.command("modhelp", (ctx) =>
   ctx.reply(
@@ -144,7 +157,7 @@ bot.on("message:voice", async (ctx) => {
   if (ctx.chat.type !== "private" && ctx.message.reply_to_message?.from?.id !== ctx.me.id) return;
   try {
     const file = await ctx.getFile();
-    const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+    const res = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`);
     const text = await transcribe(Buffer.from(await res.arrayBuffer()));
     if (!text) return void (await ctx.reply("Awaaz saaf nahi aayi jaan, phir se bolo na 🥺"));
     await handleText(ctx, text, true);
@@ -155,16 +168,12 @@ bot.on("message:voice", async (ctx) => {
 });
 
 bot.catch((err) => console.error("Bot error:", err.error));
-bot.start({
-  // chat_member (who joined which group) is not in Telegram's default update list
-  allowed_updates: [...API_CONSTANTS.DEFAULT_UPDATE_TYPES, "chat_member"],
-  onStart: async (me) => {
-    startLive();
-    console.log(`Myra (@${me.username}) online hai, ${menu.length} commands`);
-    await bot.api.setMyCommands(menu).catch((e) => console.error("setMyCommands:", e));
-    // Group admins additionally see the moderation commands in their "/" menu.
-    await bot.api
-      .setMyCommands([...MOD_MENU, ...menu].slice(0, 100), { scope: { type: "all_chat_administrators" } })
-      .catch((e) => console.error("setMyCommands(admins):", e));
-  },
-});
+
+/** What "setup" registers with Telegram: allowed update types and the "/" menus. */
+export const ALLOWED_UPDATES = [...API_CONSTANTS.DEFAULT_UPDATE_TYPES, "chat_member" /* not in Telegram's default list */] as const;
+
+export async function registerMenus() {
+  await bot.api.setMyCommands(menu.slice(0, 100));
+  // Group admins additionally see the moderation commands in their "/" menu.
+  await bot.api.setMyCommands([...MOD_MENU, ...menu].slice(0, 100), { scope: { type: "all_chat_administrators" } });
+}

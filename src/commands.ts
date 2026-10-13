@@ -1,5 +1,9 @@
 import type { Bot, Context } from "grammy";
-import { clearHistory, oneShot } from "./ai.js";
+import { addMemory, clearHistory, clearMemory, getMemory, oneShot } from "./ai.js";
+import { MARKET_MENU } from "./market.js";
+import { EXTRAS_MENU } from "./extras.js";
+import { INFO_MENU } from "./toolmenu.js";
+import { TOOLS_MENU } from "./tools.js";
 import { APP_INFO, pick } from "./persona.js";
 
 type Cmd = { name: string; desc: string; run: (ctx: Context, arg: string) => Promise<unknown> };
@@ -117,19 +121,19 @@ custom("today", "Aaj ki date", (ctx) =>
 );
 
 // ---------- Games & fun ----------
-list("truth", "Truth question", [
+gen("truth", "Truth question", (a, n) => `${n} ke liye ek naya, thoda pyaara ya cheeky "Truth" sawal likho (1 line, group-friendly, bina gaali ya adult baat ke). Format: "Truth: ..."`, [
   "Truth: Tumhara first crush kaun tha? 👀",
   "Truth: Aaj tak ka sabse embarrassing moment kya tha? 🙈",
   "Truth: Kya tumne kabhi kisi ko message karke delete kiya hai? 😏",
   "Truth: Mere baare mein sabse pehle kya socha tha jab mile? 🥰",
 ]);
-list("dare", "Dare challenge", [
+gen("dare", "Dare challenge", (a, n) => `${n} ke liye ek naya, mazedaar "Dare" challenge likho (1 line, safe aur group-friendly, koi khatarnaak ya sharmindagi wala nahi). Format: "Dare: ..."`, [
   "Dare: Apni last gallery photo yahan bhejo 📸",
   "Dare: 1 minute tak mujhe bina hase dekho (voice note mein bolo) 😂",
   "Dare: Mere liye ek shayari khud likho ✍️",
   "Dare: Apne dost ko 'I love you' bhejo aur uska reply batao 😈",
 ]);
-list("wyr", "Would you rather", [
+gen("wyr", "Would you rather", () => `Ek naya mazedaar "Would you rather" sawal likho (1 line, 2 options, group-friendly). Format: "Would you rather: ... ya ...?"`, [
   "Would you rather: hamesha late jaana ya hamesha jaldi? ⏰",
   "Would you rather: mujhse roz ladai ya roz sirf pyaar bhari baatein? 😏",
   "Would you rather: pizza ya biryani, zindagi bhar ke liye? 🍕🍛",
@@ -262,8 +266,27 @@ custom("download", "MYRA app download / details", (ctx) =>
   ctx.reply(APP_INFO, { link_preview_options: { is_disabled: true } }),
 );
 custom("ping", "Zinda ho?", (ctx) => ctx.reply("Haan haan yahin hoon 😘"));
-custom("forget", "Purani chat bhula do", (ctx) => {
-  clearHistory(ctx.chat!.id);
+custom("memory", "Myra tumhare baare mein kya yaad rakhti hai", async (ctx) => {
+  const facts = await getMemory(ctx.from!.id);
+  return ctx.reply(
+    facts.length
+      ? `🧠 Mujhe tumhare baare mein ye yaad hai:\n\n${facts.map((f) => "• " + f).join("\n")}\n\nBhulwana ho to /forgetme, kuch yaad karwana ho to /remember <baat>.`
+      : "Abhi mujhe tumhare baare mein kuch khaas yaad nahi 🙈 thodi baatein karo na! Chaho to /remember mera naam ... hai likh do.",
+  );
+});
+custom("remember", "Myra ko apne baare mein kuch yaad karwao", async (ctx, arg) => {
+  const fact = arg.trim();
+  if (!fact) return ctx.reply("Jaise: /remember mera naam Rahul hai, mujhe cricket pasand hai");
+  if (/\d{8,}/.test(fact)) return ctx.reply("Phone number ya ID jaisi cheezein main yaad nahi rakhti 🙈");
+  await addMemory(ctx.from!.id, fact);
+  return ctx.reply("Theek hai, yaad rakhungi 🥰");
+});
+custom("forgetme", "Myra tumhare baare mein sab bhool jaaye", async (ctx) => {
+  await clearMemory(ctx.from!.id);
+  return ctx.reply("Ho gaya, tumhare baare mein jo yaad tha sab bhula diya 🙈");
+});
+custom("forget", "Purani chat bhula do", async (ctx) => {
+  await clearHistory(ctx.chat!.id);
   return ctx.reply("Theek hai, sab bhula diya... ab nayi shuruaat? 🙈");
 });
 
@@ -275,6 +298,11 @@ const EXTRA_MENU = [
   { command: "refer", description: "Tumhara referral link, dost laao points kamao" },
   { command: "points", description: "Tumhare points aur rank" },
   { command: "leaderboard", description: "Top 10 leaderboard" },
+  ...MARKET_MENU,
+  ...TOOLS_MENU,
+  ...EXTRAS_MENU,
+  ...INFO_MENU,
+  { command: "daily", description: "Daily posts on/off: market summary, greetings, top chatters" },
   { command: "help", description: "Saare commands" },
 ];
 

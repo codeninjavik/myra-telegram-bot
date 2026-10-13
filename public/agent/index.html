@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#060a13">
+<title>Secret Agent</title>
+<meta name="description" content="A 2D multiplayer spy game for Telegram. One of you is the Spy.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800&family=JetBrains+Mono:wght@500;700&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+<div id="app">
+  <main id="screen" aria-live="polite"></main>
+  <nav id="nav" aria-label="Main"></nav>
+  <div class="splash" role="status" aria-label="Loading">
+    <div class="logo" style="text-align:center"><b>Secret</b><i>Agent</i></div>
+    <div class="scan"><i></i></div>
+    <div class="mute" style="font-size:13px">Verifying your credentials</div>
+  </div>
+</div>
+<noscript>SECRET AGENT needs JavaScript.</noscript>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js" defer></script>
+<script src="art.js" defer></script>
+<script src="game.js" defer></script>
+<script src="ludo.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>

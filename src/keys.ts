@@ -7,6 +7,11 @@ export class KeyPool {
     this.keys = (csv ?? "").split(",").map((k) => k.trim()).filter(Boolean);
   }
 
+  /** Adds keys that are not in the pool yet (keys submitted at runtime). */
+  add(list: string[]) {
+    for (const k of list) if (!this.keys.includes(k)) this.keys.push(k);
+  }
+
   get size() {
     return this.keys.length;
   }

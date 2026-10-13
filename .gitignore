@@ -6,3 +6,9 @@ live-tokens.json
 gate.json
 myra.db
 myra.db-*
+.netlify
+
+.build-test
+.build-maps
+
+.build-dev

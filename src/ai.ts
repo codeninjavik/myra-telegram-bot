@@ -1,11 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { storedGeminiKeys } from "./keystore.js";
+import { getJSON, setJSON } from "./store.js";
 import { KeyPool } from "./keys.js";
 import { ASKED_NAME, ASSISTANT_TELLS, CANNED, SELF_INTRO, SUGGESTION_WORDS, SYSTEM_PROMPT, pick } from "./persona.js";
 
 const groq = new KeyPool(process.env.GROQ_API_KEYS);
 const gemini = new KeyPool(process.env.GEMINI_API_KEYS);
-export const hasGemini = gemini.size > 0;
+/** Keys from the GEMINI_API_KEYS env var plus the ones submitted on the live page. */
+export async function hasGemini(): Promise<boolean> {
+  return gemini.size > 0 || (await storedGeminiKeys()).length > 0;
+}
 
 const GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
 
@@ -50,29 +57,16 @@ export function dropTrailingQuestion(text: string, strip: boolean): string {
   return kept || text;
 }
 
-const HISTORY_FILE = "history.json";
 const MAX_TURNS = 40;
 
-// Persisted to disk so restarts don't make Myra forget the conversation.
-const history = new Map<number, Msg[]>();
-try {
-  const saved = JSON.parse(readFileSync(HISTORY_FILE, "utf8")) as Record<string, Msg[]>;
-  for (const [id, msgs] of Object.entries(saved)) {
-    history.set(Number(id), msgs.map((m) => (m.role === "assistant" ? { ...m, content: scrubMeta(cleanText(m.content)) || m.content } : m)));
-  }
-} catch {}
-
-function saveHistory() {
-  try {
-    writeFileSync(HISTORY_FILE, JSON.stringify(Object.fromEntries(history)));
-  } catch (e) {
-    console.error("history save failed:", e);
-  }
+// Per-chat history lives in Netlify Blobs so every function invocation sees the whole conversation.
+async function loadHistory(chatId: number): Promise<Msg[]> {
+  const saved = (await getJSON<Msg[]>(`h/${chatId}`)) ?? [];
+  return saved.map((m) => (m.role === "assistant" ? { ...m, content: scrubMeta(cleanText(m.content)) || m.content } : m));
 }
 
-export function clearHistory(chatId: number) {
-  history.delete(chatId);
-  saveHistory();
+export async function clearHistory(chatId: number) {
+  await setJSON(`h/${chatId}`, []);
 }
 
 /** Masculine first-person verb forms; Myra is a girl and must say rahi/karti/gayi/jaungi. */
@@ -101,15 +95,230 @@ function isRepetitive(reply: string, recent: string[]): boolean {
 const MEMORY_RULE =
   "\nPichli saari baatein (upar ki chat history) yaad rakho. Agar user pooche 'maine kya bola/pehle kya baat hui' to history dekhkar sahi sahi batao.";
 
-/** Text reply via Groq (rotates keys on 401/429/5xx). */
+// Chat models that work with both Gemini key formats ("AIza..." and the newer "AQ.…"). The 2.5 models are closed to new keys.
+const GEMINI_CHAT_MODELS = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-flash-lite-latest"];
+
+type Attempt = { kind: "groq" | "gemini"; key: string; model: string };
+type LlmOpts = { fast: boolean; temperature: number; maxTokens: number };
+
+/** Groq keys first, then every Gemini key (env + the ones added on the live page), each with a model that fits. */
+async function llmAttempts(): Promise<Attempt[]> {
+  gemini.add(await storedGeminiKeys());
+  return [
+    ...groq.live().map((key, i): Attempt => ({ kind: "groq", key, model: GROQ_MODELS[i % GROQ_MODELS.length] })),
+    ...gemini.live().map((key, i): Attempt => ({ kind: "gemini", key, model: GEMINI_CHAT_MODELS[i % GEMINI_CHAT_MODELS.length] })),
+  ];
+}
+
+/** One chat completion. Returns the raw text, or "" when the key/model gave nothing (key is put on cooldown on errors). */
+async function llmCall(a: Attempt, system: string, turns: Msg[], o: LlmOpts): Promise<string> {
+  if (a.kind === "groq") {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${a.key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: a.model,
+        reasoning_effort: o.fast ? "low" : "medium", // medium understands slang better; live voice needs speed
+        include_reasoning: false,
+        messages: [{ role: "system", content: system }, ...turns],
+        temperature: o.temperature,
+        max_tokens: o.maxTokens,
+      }),
+    });
+    if (!res.ok) {
+      console.error("Groq", res.status, (await res.text()).slice(0, 120));
+      groq.cooldown(a.key, res.status === 429 ? 60_000 : 10 * 60_000);
+      return "";
+    }
+    const data: any = await res.json();
+    if (!data?.choices?.[0]?.message?.content) console.error("Groq empty reply", a.model, data?.choices?.[0]?.finish_reason);
+    return data?.choices?.[0]?.message?.content ?? "";
+  }
+
+  // Gemini wants roles user/model, starting with a user turn; merge neighbours with the same role.
+  const contents: { role: string; parts: { text: string }[] }[] = [];
+  for (const m of turns) {
+    const role = m.role === "assistant" ? "model" : "user";
+    const last = contents[contents.length - 1];
+    if (last && last.role === role) last.parts[0].text += "\n" + m.content;
+    else if (last || role === "user") contents.push({ role, parts: [{ text: m.content }] });
+  }
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${a.model}:generateContent`, {
+    method: "POST",
+    headers: { "x-goog-api-key": a.key, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents,
+      // maxOutputTokens also covers the model's thinking, so keep it roomy
+      generationConfig: { temperature: o.temperature, maxOutputTokens: Math.max(o.maxTokens, 1024) },
+    }),
+  });
+  if (!res.ok) {
+    console.error("Gemini chat", a.model, res.status, (await res.text()).slice(0, 120));
+    gemini.cooldown(a.key, res.status === 429 ? 60_000 : 10 * 60_000);
+    return "";
+  }
+  const data: any = await res.json();
+  const text: string = (data?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
+  if (!text) console.error("Gemini empty reply", a.model, data?.candidates?.[0]?.finishReason);
+  return text;
+}
+
+// ---------- realism: time of day, daily mood, what she remembers about each person ----------
+const MOODS = [
+  "bahut khush aur chulbuli",
+  "thodi sleepy aur lazy",
+  "romantic mood mein",
+  "thodi naraz, par jaldi maan jaane wali",
+  "energetic aur masti ke mood mein",
+  "shaant aur thodi thoughtful",
+];
+
+/** Same mood all day for a chat, a different one tomorrow; plus the India time so "good night" fits the hour. */
+function realismLine(chatId: number): string {
+  const ist = new Date(Date.now() + 5.5 * 3600_000);
+  const h = ist.getUTCHours();
+  const part = h < 5 ? "raat ka waqt" : h < 11 ? "subah" : h < 16 ? "dopahar" : h < 20 ? "shaam" : "raat";
+  const seed = [...`${ist.toISOString().slice(0, 10)}:${chatId}`].reduce((s, c) => (s * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const hh = String(h).padStart(2, "0");
+  const mm = String(ist.getUTCMinutes()).padStart(2, "0");
+  return (
+    `\nAbhi India mein ${hh}:${mm} baje hain (${part}). Isi hisaab se natural raho (raat ko "so jao", subah "chai pi?"), par har baar waqt mat batao.` +
+    `\nAaj tumhara mood: ${MOODS[seed % MOODS.length]}. Ise halke se dikhao, zabardasti nahi.`
+  );
+}
+
+type Memory = { facts: string[]; n: number };
+const memKey = (userId: number) => `mem/${userId}`;
+
+async function memoryLine(userId: number): Promise<string> {
+  const m = await getJSON<Memory>(memKey(userId));
+  if (!m?.facts.length) return "";
+  return `\nIs insaan ke baare mein tumhe ye yaad hai (sirf zaroorat par, natural tareeke se use karo, list ki tarah mat sunao): ${m.facts.join("; ")}.`;
+}
+
+export async function getMemory(userId: number): Promise<string[]> {
+  return (await getJSON<Memory>(memKey(userId)))?.facts ?? [];
+}
+
+export async function clearMemory(userId: number) {
+  await setJSON(memKey(userId), { facts: [], n: 0 });
+}
+
+export async function addMemory(userId: number, fact: string) {
+  const m = (await getJSON<Memory>(memKey(userId))) ?? { facts: [], n: 0 };
+  m.facts = [...m.facts.filter((f) => f !== fact), fact.slice(0, 120)].slice(-15);
+  await setJSON(memKey(userId), m);
+}
+
+/**
+ * Every 5th message from a person, Myra reads the latest chat and keeps lasting facts about them
+ * (name, city, likes, work, birthday...). Call it after the reply has been sent. /memory shows them, /forgetme clears them.
+ */
+export async function learnAbout(userId: number, chatId: number): Promise<void> {
+  const m = (await getJSON<Memory>(memKey(userId))) ?? { facts: [], n: 0 };
+  m.n += 1;
+  if (m.n % 5 !== 0) return void (await setJSON(memKey(userId), m));
+  const recent = (await loadHistory(chatId)).slice(-10);
+  const chat = recent.map((t) => `${t.role === "user" ? "User" : "Myra"}: ${t.content}`).join("\n");
+  const system =
+    "You extract durable personal facts about the USER from a chat. Output ONLY a JSON array of short Hinglish strings " +
+    '(e.g. ["naam Rahul hai","Delhi mein rehta hai","cricket pasand hai"]). Include only clear facts the user stated about themselves ' +
+    "(name, city, job/study, family, hobbies, likes/dislikes, birthday). No guesses, no feelings of the moment, no secrets like phone numbers, " +
+    "passwords or addresses. Keep old facts that are still true. Max 15 items. If nothing, output the old list unchanged.";
+  for (const attempt of await llmAttempts()) {
+    try {
+      const out = await llmCall(
+        attempt,
+        system,
+        [{ role: "user", content: `Old facts: ${JSON.stringify(m.facts)}\n\nChat:\n${chat}` }],
+        { fast: true, temperature: 0.1, maxTokens: 500 },
+      );
+      const json = out.match(/\[[\s\S]*\]/)?.[0];
+      if (!json) continue;
+      const facts = (JSON.parse(json) as unknown[])
+        .filter((f): f is string => typeof f === "string")
+        .map((f) => f.trim().slice(0, 120))
+        .filter((f) => f && !/\d{8,}/.test(f)) // never keep long digit strings (phone numbers, ids)
+        .slice(0, 15);
+      m.facts = facts;
+      break;
+    } catch (e) {
+      console.error("learnAbout error:", e);
+    }
+  }
+  await setJSON(memKey(userId), m);
+}
+
+// ---------- Gemini Live (realtime voice in the browser) ----------
+/**
+ * The browser talks to Gemini Live directly, so it must not get a real API key. This mints a one-use,
+ * short-lived token from a key in the pool; the token only works for the Live API and expires in minutes.
+ */
+export async function createLiveToken(): Promise<string | null> {
+  gemini.add(await storedGeminiKeys());
+  for (const key of gemini.live()) {
+    try {
+      const res = await fetch("https://generativelanguage.googleapis.com/v1alpha/auth_tokens", {
+        method: "POST",
+        headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(8000),
+        body: JSON.stringify({
+          uses: 1,
+          expireTime: new Date(Date.now() + 30 * 60_000).toISOString(), // session may run this long
+          newSessionExpireTime: new Date(Date.now() + 2 * 60_000).toISOString(), // but must be opened within 2 minutes
+        }),
+      });
+      if (!res.ok) {
+        console.error("auth_tokens", res.status, (await res.text()).slice(0, 100));
+        gemini.cooldown(key, res.status === 429 ? 60_000 : 10 * 60_000);
+        continue;
+      }
+      const name = ((await res.json()) as any)?.name;
+      if (typeof name === "string" && name) return name;
+    } catch (e) {
+      console.error("createLiveToken error:", e);
+    }
+  }
+  return null;
+}
+
+const PERSONAS: Record<string, string> = {
+  romantic: "",
+  friend: "\nAaj tum ek pakki dost ki tarah ho: apnapan, masti aur sachchi salah, pyaar bhari baatein kam, dosti wali zyada.",
+  funny: "\nAaj tum bahut mazaakiya ho: halke jokes, chhedna aur masti, par kisi ko bura na lage.",
+  calm: "\nAaj tum shaant aur samajhdaar ho: dheere, sukoon se, dhyan se sunne wali aur dilaasa dene wali.",
+};
+
+/** System prompt for a realtime session: persona + time/mood + what Myra remembers + the last turns of this chat. */
+export async function realtimeSystem(chatId: number, base: string, persona = "romantic"): Promise<string> {
+  const recent = (await loadHistory(chatId)).slice(-10);
+  const history = recent.length
+    ? "\nPichli baat-cheet (yaad rakho, dohrao mat):\n" +
+      recent.map((t) => `${t.role === "user" ? "User" : "Myra"}: ${t.content.slice(0, 200)}`).join("\n")
+    : "";
+  return base + (PERSONAS[persona] ?? "") + realismLine(chatId) + (await memoryLine(chatId)) + history;
+}
+
+/** One finished live turn (what the person said, what Myra said) goes into the same history the chat uses. */
+export async function appendTurn(chatId: number, user: string, assistant: string) {
+  const turns = await loadHistory(chatId);
+  if (user.trim()) turns.push({ role: "user", content: user.trim().slice(0, 1000) });
+  if (assistant.trim()) turns.push({ role: "assistant", content: scrubMeta(cleanText(assistant)).slice(0, 1500) || assistant.trim().slice(0, 1500) });
+  await setJSON(`h/${chatId}`, turns.slice(-MAX_TURNS));
+}
+
+/** Text reply via Groq, falling back to Gemini (rotates keys on 401/429/5xx). */
 export async function chatReply(
   chatId: number,
   text: string,
   extraSystem = "",
   fast = false,
   systemOverride?: string,
+  userId?: number,
 ): Promise<string> {
-  const turns = history.get(chatId) ?? [];
+  const turns = await loadHistory(chatId);
+  const realism = realismLine(chatId) + (userId ? await memoryLine(userId) : "");
   const plainText = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
   // Same question asked again: remember how it was answered so the new answer is worded differently.
   let earlierAnswer = "";
@@ -124,32 +333,16 @@ export async function chatReply(
     ? `\nIMPORTANT: user ne ye sawal pehle bhi pucha hai aur tumne kaha tha: "${earlierAnswer.slice(0, 200)}". Ab bilkul alag shabdon aur andaaz mein jawab do, wahi baat dohrao mat. Chaho to pyaar se chhedo ki "phir wahi sawal?" aur naye tareeke se batao.`
     : "";
   let retries = 0;
-  for (const [i, key] of groq.live().entries()) {
-    const modelIdx = i % GROQ_MODELS.length;
+  for (const attempt of await llmAttempts()) {
     try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: GROQ_MODELS[modelIdx],
-          reasoning_effort: fast ? "low" : "medium", // medium understands slang better; live voice needs speed
-          include_reasoning: false,
-          messages: [{ role: "system", content: (systemOverride ?? SYSTEM_PROMPT) + MEMORY_RULE + extraSystem + nudge }, ...turns.slice(systemOverride ? -8 : -MAX_TURNS)],
-          temperature: 0.95,
-          max_tokens: fast ? 500 : 700,
-        }),
-      });
-      if (!res.ok) {
-        console.error("Groq", res.status, (await res.text()).slice(0, 120));
-        groq.cooldown(key, res.status === 429 ? 60_000 : 10 * 60_000);
-        continue;
-      }
-      const data: any = await res.json();
-      const reply: string | undefined = scrubMeta(cleanText(data?.choices?.[0]?.message?.content));
-      if (!reply) {
-        console.error("Groq empty reply", GROQ_MODELS[modelIdx], data?.choices?.[0]?.finish_reason);
-        continue;
-      }
+      const raw = await llmCall(
+        attempt,
+        (systemOverride ?? SYSTEM_PROMPT) + MEMORY_RULE + realism + extraSystem + nudge,
+        turns.slice(systemOverride ? -8 : -MAX_TURNS),
+        { fast, temperature: 0.95, maxTokens: fast ? 500 : 700 },
+      );
+      const reply = scrubMeta(cleanText(raw));
+      if (!reply) continue;
       const recent = turns.filter((m) => m.role === "assistant").slice(-8).map((m) => m.content);
       const problem =
         retries >= 2 ? null
@@ -175,11 +368,10 @@ export async function chatReply(
       const prev = [...turns].reverse().find((m) => m.role === "assistant")?.content ?? "";
       const final = dropTrailingQuestion(reply, /\?\W*$/.test(prev) || Math.random() < 0.6);
       turns.push({ role: "assistant", content: final });
-      history.set(chatId, turns.slice(-MAX_TURNS));
-      saveHistory();
+      await setJSON(`h/${chatId}`, turns.slice(-MAX_TURNS));
       return final;
     } catch (e) {
-      console.error("Groq error:", e);
+      console.error("LLM error:", e);
     }
   }
   turns.pop();
@@ -188,29 +380,12 @@ export async function chatReply(
 
 /** Stateless one-off generation in Myra's voice (used by /commands). Returns fallback on failure. */
 export async function oneShot(task: string, fallback: string): Promise<string> {
-  for (const [i, key] of groq.live().entries()) {
+  const prompt: Msg[] = [
+    { role: "user", content: `[Task, chat message nahi] ${task}\nSirf final message likho, Myra ki tarah, Hinglish mein.` },
+  ];
+  for (const attempt of await llmAttempts()) {
     try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: GROQ_MODELS[i % GROQ_MODELS.length],
-          reasoning_effort: "low",
-          include_reasoning: false,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: `[Task, chat message nahi] ${task}\nSirf final message likho, Myra ki tarah, Hinglish mein.` },
-          ],
-          temperature: 1,
-          max_tokens: 500,
-        }),
-      });
-      if (!res.ok) {
-        groq.cooldown(key, res.status === 429 ? 60_000 : 10 * 60_000);
-        continue;
-      }
-      const data: any = await res.json();
-      const out: string | undefined = scrubMeta(cleanText(data?.choices?.[0]?.message?.content));
+      const out = scrubMeta(cleanText(await llmCall(attempt, SYSTEM_PROMPT, prompt, { fast: true, temperature: 1, maxTokens: 500 })));
       if (out) return out;
     } catch (e) {
       console.error("oneShot error:", e);
@@ -241,6 +416,75 @@ export async function transcribe(audio: Buffer, mime = "audio/ogg", filename = "
       console.error("Whisper error:", e);
     }
   }
+  // No Groq key left (or all failed): Gemini can transcribe audio too.
+  const out = await geminiMedia(
+    "Transcribe this audio exactly as spoken, in the original language (Hinglish in Roman letters if Hindi). Output only the transcript.",
+    audio,
+    mime.split(";")[0] || "audio/ogg",
+  );
+  return out?.trim() || null;
+}
+
+/** One Gemini call with an inline file (image or audio). Tries every key and model; returns null if all fail. */
+async function geminiMedia(prompt: string, data: Buffer, mime: string, system?: string): Promise<string | null> {
+  gemini.add(await storedGeminiKeys());
+  for (const [i, key] of gemini.live().entries()) {
+    const model = GEMINI_CHAT_MODELS[i % GEMINI_CHAT_MODELS.length];
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(25_000),
+        body: JSON.stringify({
+          ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+          contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime, data: data.toString("base64") } }, { text: prompt }] }],
+          generationConfig: { temperature: 0.8, maxOutputTokens: 1500 },
+        }),
+      });
+      if (!res.ok) {
+        console.error("Gemini media", model, res.status, (await res.text()).slice(0, 100));
+        gemini.cooldown(key, res.status === 429 ? 60_000 : 10 * 60_000);
+        continue;
+      }
+      const j: any = await res.json();
+      const text: string = (j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text ?? "").join("");
+      if (text.trim()) return text;
+    } catch (e) {
+      console.error("Gemini media error:", e);
+    }
+  }
+  return null;
+}
+
+/** Myra looks at a photo and answers in her own style. Null when no Gemini key works. */
+export async function describeImage(image: Buffer, mime: string, question: string): Promise<string | null> {
+  const ask = question.trim() || "Is photo mein kya hai? Apne andaaz mein batao.";
+  const out = await geminiMedia(
+    `User ne ye photo bheji hai aur kaha: "${ask}". Photo dekhkar usi ke hisaab se Myra ki tarah jawab do. Chhota (2-4 vaakya), Hinglish, bina markdown.`,
+    image,
+    mime,
+    SYSTEM_PROMPT,
+  );
+  return out ? scrubMeta(cleanText(out)) : null;
+}
+
+/** Plain translation (no persona). `to` can be a code ("hi") or a name ("hindi"). */
+export async function translate(text: string, to: string): Promise<string | null> {
+  const system =
+    "You are a translation engine. Translate the user's text into the target language and output ONLY the translation, " +
+    "no quotes, no explanations. If the target is Hindi, write in Devanagari unless the target is given as 'hinglish'.";
+  for (const attempt of await llmAttempts()) {
+    try {
+      const out = await llmCall(attempt, system, [{ role: "user", content: `Target language: ${to}\n\nText:\n${text}` }], {
+        fast: true,
+        temperature: 0.2,
+        maxTokens: 800,
+      });
+      if (out.trim()) return out.trim();
+    } catch (e) {
+      console.error("translate error:", e);
+    }
+  }
   return null;
 }
 
@@ -250,6 +494,7 @@ const TTS_MODELS = [
   "gemini-2.5-pro-tts",
   "gemini-2.5-flash-preview-tts",
   "gemini-2.5-pro-preview-tts",
+  "gemini-3.8-flash-tts",
 ];
 
 function pcmToWav(pcm: Buffer, rate = 24000): Buffer {
@@ -270,11 +515,32 @@ function pcmToWav(pcm: Buffer, rate = 24000): Buffer {
   return Buffer.concat([h, pcm]);
 }
 
+/**
+ * Netlify has no system ffmpeg. The site is deployed from Windows, where ffmpeg-static would only bring an .exe,
+ * so the Linux build comes from its own package. Zip files lose the executable bit, hence the copy to /tmp.
+ */
+function ffmpegBin(): string {
+  const req = createRequire(import.meta.url);
+  if (process.platform === "linux") {
+    try {
+      const dst = "/tmp/ffmpeg";
+      if (!existsSync(dst)) {
+        copyFileSync(join(dirname(req.resolve("@ffmpeg-installer/linux-x64/package.json")), "ffmpeg"), dst);
+        chmodSync(dst, 0o755);
+      }
+      return dst;
+    } catch (e) {
+      console.error("bundled linux ffmpeg unavailable:", e);
+    }
+  }
+  return "ffmpeg"; // local development: whatever is on PATH
+}
+
 /** Telegram only renders a proper voice bubble (with duration) for OGG/Opus; WAV shows 0:00. */
 export function toOggOpus(wav: Buffer): { data: Buffer; name: string } {
   try {
     const r = spawnSync(
-      "ffmpeg",
+      ffmpegBin(),
       ["-v", "error", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "32k", "-f", "ogg", "pipe:1"],
       { input: wav, maxBuffer: 32 * 1024 * 1024 },
     );
@@ -297,14 +563,15 @@ export const VOICES = [
   "Umbriel", "Algieba", "Algenib", "Rasalgethi", "Alnilam", "Schedar", "Achird", "Zubenelgenubi", "Sadachbia", "Sadaltager",
 ];
 
-export function getHistory(chatId: number): { role: string; content: string }[] {
-  return (history.get(chatId) ?? []).slice(-30);
+export async function getHistory(chatId: number): Promise<{ role: string; content: string }[]> {
+  return (await loadHistory(chatId)).slice(-30);
 }
 
 /** Gemini TTS -> WAV buffer, or null if every model/key fails. */
 export async function speak(text: string, voiceName = "Aoede", preferredModel?: string): Promise<Buffer | null> {
   const clean = text.replace(/\p{Extended_Pictographic}|️/gu, "").trim();
   if (!clean) return null;
+  gemini.add(await storedGeminiKeys());
   const first = preferredModel && TTS_MODELS.includes(preferredModel) ? preferredModel : goodModel;
   const models = first ? [first, ...TTS_MODELS.filter((m) => m !== first)] : TTS_MODELS;
   for (const model of models) {

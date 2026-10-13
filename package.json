@@ -3,17 +3,32 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "dev": "tsx watch --env-file=.env src/index.ts",
-    "start": "tsx --env-file=.env src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "dev": "npx netlify-cli dev",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs",
+    "agent:dev": "node scripts/agent-dev.mjs",
+    "agent:maps": "node scripts/agent-maps.mjs",
+    "migrate": "node scripts/migrate.ts"
   },
   "dependencies": {
-    "grammy": "^1.46.0"
+    "@netlify/blobs": "^11.1.4",
+    "@netlify/functions": "^6.0.2",
+    "@resvg/resvg-wasm": "^2.6.2",
+    "grammy": "^1.46.0",
+    "satori": "^0.48.1"
   },
   "devDependencies": {
+    "@fontsource/noto-sans-devanagari": "^5.3.0",
+    "@fontsource/playfair-display": "^5.3.0",
+    "@fontsource/roboto": "^5.3.0",
     "@types/node": "^26.6.5",
-    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
+  },
+  "optionalDependencies": {
+    "@ffmpeg-installer/linux-x64": "^4.1.0"
   }
 }

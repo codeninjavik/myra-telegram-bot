@@ -158,6 +158,24 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
 
 .toast{position:absolute;left:50%;bottom:104px;transform:translate(-50%,16px);background:#17171b;color:#fff;font-size:14px;padding:11px 16px;border-radius:14px;opacity:0;pointer-events:none;transition:.25s;max-width:86%;text-align:center;z-index:9}
 .toast.on{opacity:1;transform:translate(-50%,0)}
+/* themes: only the accent and surface tokens change */
+html[data-theme="violet"]{--red:#7C3AED;--red-hi:#A78BFA;--red-lo:#5B21B6;--red-tint:#EDE9FE;--shadow-red:0 10px 28px rgba(124,58,237,.38)}
+html[data-theme="ocean"]{--red:#0891B2;--red-hi:#38BDF8;--red-lo:#0E7490;--red-tint:#E0F2FE;--shadow-red:0 10px 28px rgba(8,145,178,.38)}
+html[data-theme="dark"]{--bg:#0E0E12;--surface:#1B1B22;--ink:#F4F4F6;--muted:#A0A0AD;--line:#2B2B35;--red-tint:#2A1519;--orb:#000}
+.bubble.link{color:var(--red-lo);font-weight:600;text-decoration:none;display:inline-block}
+.facts{list-style:none;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.facts li{padding:8px 12px;border-radius:12px;background:var(--red-tint)}
+.facts li.empty{background:none;color:var(--muted);padding:0}
+.keygate{position:fixed;inset:0;z-index:50;background:rgba(13,13,16,.62);display:grid;place-items:center;padding:16px;backdrop-filter:blur(6px)}
+.keygate[hidden]{display:none}
+.kgbox{width:min(440px,100%);background:var(--surface);border-radius:var(--r-lg);padding:22px 20px;display:flex;flex-direction:column;gap:12px;box-shadow:0 30px 80px rgba(0,0,0,.35);max-height:calc(100dvh - 32px);overflow:auto}
+.kgbox h2{font-family:var(--font-d);font-size:20px;font-weight:800}
+.kgbox p{font-size:14px;line-height:1.5}
+.kgbox .kgsmall{font-size:12.5px;color:var(--muted)}
+.kgbox a{color:var(--red-lo);font-weight:600}
+.kgbox input{width:100%;padding:13px 14px;border-radius:var(--r-sm);border:1px solid var(--line);font:inherit;font-size:15px;background:#fff}
+.kgerr{min-height:18px;font-size:13px;color:var(--red-lo);font-weight:600}
+.kgbox .btn:disabled{opacity:.6;cursor:progress}
 
 @media (max-height:700px){
   .tiles .tile small{display:none}
@@ -309,8 +327,46 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
               <select id="selLang"><option value="hi-IN">Hindi / Hinglish</option><option value="en-IN">English (India)</option></select>
             </div>
           </div>
+          <div class="field"><label for="selMic">Mic mode</label>
+            <select id="selMic">
+              <option value="recorder">Silent recorder (beep nahi aata)</option>
+              <option value="browser">Browser speech (tez, par beep aa sakta hai)</option>
+            </select>
+          </div>
           <button class="btn primary" id="preview" type="button">Preview voice</button>
           <p class="note" id="modelNote">Model available na ho to agla model apne aap use hota hai.</p>
+        </div>
+        <div class="card">
+          <h3>Myra</h3>
+          <div class="field"><label for="selMode">Baat karne ka tareeka</label>
+            <select id="selMode">
+              <option value="realtime">Realtime (Gemini Live): seedha baat, beech mein rok sakte ho</option>
+              <option value="classic">Classic: bolo, ruko, jawab suno</option>
+            </select>
+          </div>
+          <div class="two">
+            <div class="field"><label for="selPersona">Persona</label>
+              <select id="selPersona">
+                <option value="romantic">Romantic</option>
+                <option value="friend">Dost</option>
+                <option value="funny">Mazaakiya</option>
+                <option value="calm">Shaant</option>
+              </select>
+            </div>
+            <div class="field"><label for="selTheme">Theme</label>
+              <select id="selTheme">
+                <option value="red">Red</option>
+                <option value="violet">Violet</option>
+                <option value="ocean">Ocean</option>
+                <option value="dark">Dark</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Myra ko kya yaad hai</h3>
+          <ul class="facts" id="facts"><li class="empty">Abhi kuch nahi</li></ul>
+          <button class="btn" id="forgetAll" type="button">Sab bhula do</button>
         </div>
         <div class="card">
           <h3>Conversation</h3>
@@ -326,6 +382,17 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
     <button data-tab="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>History</button>
     <button data-tab="me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.5 4.5-6 8-6s7 1.5 8 6"/></svg>Me</button>
   </nav>
+  <div class="keygate" id="keygate" role="dialog" aria-modal="true" aria-labelledby="kgTitle" hidden>
+    <form class="kgbox" id="kgForm" autocomplete="off">
+      <h2 id="kgTitle">Add Gemini API key</h2>
+      <p>Ye key bot ke sabhi users ke liye use hogi.</p>
+      <p class="kgsmall"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/apikey</a> se free key banao.</p>
+      <label class="sr" for="kgKey">Gemini API key</label>
+      <input id="kgKey" type="password" inputmode="text" placeholder="AIza... ya AQ...." spellcheck="false" autocapitalize="off" required>
+      <div class="kgerr" id="kgErr" role="alert"></div>
+      <button class="btn primary" id="kgBtn" type="submit">Save karo</button>
+    </form>
+  </div>
   <div class="toast" id="toast" role="status"></div>
 </main>
 
@@ -341,8 +408,10 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
   };
   const cfg = {
     model: store.get("model", null), voice: store.get("voice", "Aoede"), speak: store.get("speak", true),
-    engine: store.get("engine", "auto"), lang: store.get("lang", "hi-IN"),
+    engine: store.get("engine2", "gemini"), lang: store.get("lang", "hi-IN"), mic: store.get("mic", "recorder"),
+    mode: store.get("mode", "realtime"), persona: store.get("persona", "romantic"), theme: store.get("theme", "red"),
   };
+  document.documentElement.dataset.theme = cfg.theme;
   const isDesktop = () => matchMedia("(min-width:900px)").matches;
 
   /* ---------- helpers ---------- */
@@ -408,6 +477,15 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
     box.innerHTML = "<h2>Conversation</h2>";
     if (!log.length) { box.insertAdjacentHTML("beforeend", '<p class="empty">Abhi koi baat nahi hui. Mic dabao aur bolo.</p>'); return; }
     for (const m of log) {
+      if (m.role === "link") {
+        // Links Myra found for you (YouTube, websites): only http(s), opened by your own tap.
+        const a = document.createElement("a");
+        a.className = "bubble link";
+        a.href = m.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+        a.textContent = "🔗 " + m.content;
+        box.appendChild(a);
+        continue;
+      }
       const d = document.createElement("div");
       d.className = "bubble" + (m.role === "user" ? " me" : "");
       d.textContent = m.content;
@@ -415,7 +493,14 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
     }
     box.scrollTop = box.scrollHeight;
   }
-  fetch(api("history")).then((r) => r.json()).then((d) => { (d.messages || []).forEach((m) => log.push(m)); renderLog(); }).catch(renderLog);
+  fetch(api("history")).then((r) => {
+    if (r.status === 401) {
+      // The page is static; the server only knows here whether the link is still valid.
+      document.body.innerHTML = "<div style='font-family:sans-serif;padding:2rem'><h3>Link expire ho gaya</h3><p>Telegram mein bot ko <b>/live</b> bhejo aur naya link lo.</p></div>";
+      throw new Error("expired");
+    }
+    return r.json();
+  }).then((d) => { (d.messages || []).forEach((m) => log.push(m)); renderLog(); }).catch(renderLog);
 
   /* ---------- speech output ---------- */
   const player = new Audio();
@@ -537,7 +622,8 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
   }
 
   /* ---------- listening: browser speech recognition (instant, continuous) ---------- */
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // The browser recogniser beeps on every start/stop (Android Chrome). Default is the silent recorder; "browser" is opt-in.
+  const SR = cfg.mic === "browser" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
   let recog = null, wantRecog = false, sendTimer = 0;
 
   function startRecognition() {
@@ -674,7 +760,245 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
     say("Hello!", "How can I help you today?");
   }
 
+  /* ---------- Realtime: Gemini Live straight from the browser ---------- */
+  // The page asks the server for a one-use token (never a real key), then streams mic audio (16 kHz PCM) over a
+  // WebSocket and plays back the 24 kHz PCM that comes back. Gemini detects speech itself, so there is no
+  // browser speech recogniser (no beeps) and you can talk over Myra at any time.
+  const rt = (() => {
+    const WS = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=";
+    const TOOLS = [{ functionDeclarations: [
+      { name: "open_website", description: "Gives the user a link to a website.", parameters: { type: "OBJECT", properties: { url: { type: "STRING", description: "URL or domain, e.g. github.com" } }, required: ["url"] } },
+      { name: "search_youtube", description: "Finds a song or video on YouTube and gives the user a link to play it.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
+      { name: "get_weather", description: "Current weather for a city, or where the user is if no city is given.", parameters: { type: "OBJECT", properties: { city: { type: "STRING" } } } },
+      { name: "remember", description: "Remember a lasting fact the user told about themselves (name, city, likes).", parameters: { type: "OBJECT", properties: { fact: { type: "STRING" } }, required: ["fact"] } },
+    ] }];
+    const WORKLET = "class P extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c)this.port.postMessage(c.slice());return true}}registerProcessor('p',P)";
+
+    let ws = null, stream = null, inCtx = null, outCtx = null, node = null, srcNode = null;
+    let active = false, ready = false, stopping = false, dropAudio = false, retries = 0, onReady = null;
+    let nextAt = 0, playing = new Set(), userText = "", botText = "", typed = "", session = null, modelIdx = 0, pcmBuf = [];
+
+    const b64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+    const send = (o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+
+    function addLink(label, url) { log.push({ role: "link", content: label, url }); renderLog(); toast("Link ready: Conversation tab mein dekho"); }
+
+    async function runTool(c) {
+      const a = c.args || {};
+      try {
+        if (c.name === "open_website") {
+          let u = String(a.url || "").trim();
+          if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+          const p = new URL(u);
+          if (!/^https?:$/.test(p.protocol)) return { error: "invalid url" };
+          addLink(p.hostname, p.href);
+          return { result: "link user ko dikha diya gaya" };
+        }
+        if (c.name === "search_youtube") {
+          const q = String(a.query || "").trim().slice(0, 100);
+          if (!q) return { error: "query khaali hai" };
+          addLink("YouTube: " + q, "https://www.youtube.com/results?search_query=" + encodeURIComponent(q));
+          return { result: "YouTube ka link user ko dikha diya gaya" };
+        }
+        if (c.name === "get_weather") {
+          let qs = "";
+          if (a.city) qs = "city=" + encodeURIComponent(String(a.city));
+          else {
+            const pos = await new Promise((res) => navigator.geolocation ? navigator.geolocation.getCurrentPosition(res, () => res(null), { timeout: 8000 }) : res(null));
+            if (!pos) return { error: "location nahi mili, shehar ka naam batao" };
+            qs = `lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`;
+          }
+          return await (await fetch(api("weather") + "&" + qs)).json();
+        }
+        if (c.name === "remember") {
+          const r = await fetch(api("memory"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fact: String(a.fact || "") }) });
+          if (r.ok) loadFacts();
+          return r.ok ? { result: "yaad rakh liya" } : { error: "yaad nahi rakh payi" };
+        }
+      } catch (e) { return { error: String(e.message || e) }; }
+      return { error: "unknown tool" };
+    }
+
+    function stopPlayback() {
+      for (const s of playing) { try { s.stop(); } catch {} }
+      playing.clear(); nextAt = 0;
+    }
+
+    function playPcm(data) {
+      if (!outCtx || dropAudio) return;
+      const bin = atob(data), n = bin.length >> 1;
+      const buf = outCtx.createBuffer(1, n, 24000), ch = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) { let v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8); if (v >= 0x8000) v -= 0x10000; ch[i] = v / 32768; }
+      const src = outCtx.createBufferSource();
+      src.buffer = buf; src.connect(outCtx.destination);
+      const t = Math.max(outCtx.currentTime + 0.03, nextAt);
+      src.start(t); nextAt = t + buf.duration;
+      playing.add(src);
+      src.onended = () => {
+        playing.delete(src);
+        if (!playing.size) setTimeout(() => { if (active && !playing.size && state === "speaking") { setState("listening"); say("Hello!", "Sun rahi hoon, bolo..."); } }, 250);
+      };
+      if (state !== "speaking") setState("speaking");
+    }
+
+    /** Turn finished (or cut off): store it in the page log and on the server so chat and live share one memory. */
+    function flushTurn() {
+      const u = (userText || typed).trim(), b = botText.trim();
+      userText = ""; botText = ""; typed = "";
+      if (!u && !b) return;
+      if (u && !log.length || u && log[log.length - 1].content !== u) log.push({ role: "user", content: u });
+      if (b) log.push({ role: "assistant", content: b });
+      renderLog();
+      fetch(api("live-turn"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user: u, assistant: b }) }).catch(() => {});
+    }
+
+    async function onMessage(ev) {
+      let m;
+      try { m = JSON.parse(typeof ev.data === "string" ? ev.data : await ev.data.text()); } catch { return; }
+      if (m.setupComplete) {
+        ready = true; retries = 0;
+        if (onReady) { onReady(); onReady = null; }
+        setState("listening"); say("Hello!", "Sun rahi hoon, bolo...");
+        return;
+      }
+      if (m.toolCall) {
+        const calls = m.toolCall.functionCalls || [];
+        const responses = [];
+        for (const c of calls) responses.push({ id: c.id, name: c.name, response: await runTool(c) });
+        send({ toolResponse: { functionResponses: responses } });
+        return;
+      }
+      if (m.goAway) { reconnect(); return; }
+      const sc = m.serverContent;
+      if (!sc) return;
+      if (sc.interrupted) { stopPlayback(); dropAudio = false; flushTurn(); setState("listening"); say("Hello!", "Sun rahi hoon, bolo..."); }
+      if (sc.inputTranscription?.text) { userText += sc.inputTranscription.text; say(short(userText.trim(), 60), "Sun rahi hoon..."); }
+      if (sc.outputTranscription?.text) { botText += sc.outputTranscription.text; say(short((userText || typed).trim(), 60), short(botText.trim(), 160)); }
+      for (const p of sc.modelTurn?.parts || []) if (p.inlineData?.data) playPcm(p.inlineData.data);
+      if (sc.turnComplete) { dropAudio = false; flushTurn(); }
+    }
+
+    function connect() {
+      return new Promise((resolve, reject) => {
+        const model = session.models[modelIdx];
+        ws = new WebSocket(WS + encodeURIComponent(session.token));
+        ready = false;
+        ws.onopen = () => send({ setup: {
+          model: "models/" + model,
+          generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: cfg.voice } } } },
+          systemInstruction: { parts: [{ text: session.system }] },
+          tools: TOOLS,
+          inputAudioTranscription: {}, outputAudioTranscription: {},
+        } });
+        onReady = resolve;
+        ws.onmessage = onMessage;
+        ws.onerror = () => {};
+        ws.onclose = (ev) => {
+          if (!ready) return reject(new Error(ev.reason || "connection band (" + ev.code + ")"));
+          if (active && !stopping) reconnect();
+        };
+      });
+    }
+
+    async function getSession() {
+      const r = await fetch(api("live-token"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ voice: cfg.voice, persona: cfg.persona }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "server error " + r.status);
+      return d;
+    }
+
+    // Open the session, trying the next live model if one is refused.
+    async function open() {
+      session = await getSession();
+      for (modelIdx = 0; modelIdx < session.models.length; modelIdx++) {
+        try { await connect(); return; }
+        catch (e) {
+          if (modelIdx === session.models.length - 1) throw e;
+          session = await getSession(); // tokens are single use
+        }
+      }
+    }
+
+    async function reconnect() {
+      if (!active || stopping) return;
+      try { ws && ws.close(); } catch {}
+      stopPlayback();
+      if (++retries > 3) { toast("Connection toot gaya, mic dobara dabao"); stop(); return; }
+      setState("thinking"); say("Dobara jud rahi hoon...", "Ek second");
+      try { await open(); } catch (e) { toast("Connect nahi hua: " + e.message); stop(); }
+    }
+
+    async function startAudio() {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      outCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+      inCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      await Promise.all([outCtx.resume(), inCtx.resume()]);
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+      await inCtx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      srcNode = inCtx.createMediaStreamSource(stream);
+      node = new AudioWorkletNode(inCtx, "p");
+      const ratio = inCtx.sampleRate / 16000;
+      node.port.onmessage = (e) => {
+        const f = e.data;
+        let sum = 0; for (let i = 0; i < f.length; i++) sum += f[i] * f[i];
+        const rms = Math.sqrt(sum / f.length);
+        level = Math.min(1, rms * 9);
+        if (rms > 0.02) activityAt = performance.now();
+        if (!ready) return;
+        // Safari may ignore the requested rate: pick every Nth sample so Gemini always gets 16 kHz.
+        for (let i = 0; i < f.length; i += ratio) pcmBuf.push(Math.max(-1, Math.min(1, f[Math.floor(i)])) * 32767);
+        if (pcmBuf.length >= 640) { // 40 ms
+          const pcm = new Int16Array(pcmBuf); pcmBuf = [];
+          send({ realtimeInput: { audio: { data: b64(new Uint8Array(pcm.buffer)), mimeType: "audio/pcm;rate=16000" } } });
+        }
+      };
+      srcNode.connect(node); // not connected to the speakers: the worklet only listens
+    }
+
+    async function start() {
+      if (active) return;
+      if (!window.isSecureContext || !navigator.mediaDevices || !window.AudioWorklet) { toast("Is browser mein realtime mic nahi chalega, Classic mode use karo"); return; }
+      active = true; stopping = false; live = true; retries = 0; dropAudio = false;
+      setState("thinking"); say("Connect ho rahi hoon...", "Ek second");
+      try {
+        await startAudio();
+        await open();
+      } catch (e) {
+        const denied = e && (e.name === "NotAllowedError" || e.name === "SecurityError");
+        toast(denied ? "Mic permission do, phir mic dabao" : "Connect nahi hua: " + (e.message || e));
+        stop();
+      }
+    }
+
+    function stop() {
+      stopping = true; active = false; ready = false; live = false;
+      try { ws && ws.close(); } catch {}
+      stopPlayback();
+      try { node && node.disconnect(); srcNode && srcNode.disconnect(); } catch {}
+      stream && stream.getTracks().forEach((t) => t.stop());
+      inCtx && inCtx.close().catch(() => {}); outCtx && outCtx.close().catch(() => {});
+      ws = stream = inCtx = outCtx = node = srcNode = null; pcmBuf = []; level = 0;
+      flushTurn();
+      setState("idle"); say("Hello!", "How can I help you today?");
+    }
+
+    return {
+      get active() { return active; },
+      start, stop,
+      // Tap while Myra speaks: cut her off locally and ignore the rest of that answer.
+      interrupt() { dropAudio = true; stopPlayback(); setState("listening"); say("Hello!", "Sun rahi hoon, bolo..."); },
+      sendText(t) { typed = t; log.push({ role: "user", content: t }); renderLog(); send({ realtimeInput: { text: t } }); },
+    };
+  })();
+
   $("#mic").addEventListener("click", () => {
+    if (cfg.mode === "realtime") {
+      if (!rt.active) rt.start();
+      else if (state === "speaking") rt.interrupt();
+      else rt.stop();
+      return;
+    }
     if (!live) startLive();
     else if (state === "speaking" || state === "thinking") { interrupt(); busy = false; setState("listening"); say("Hello!", "Sun rahi hoon, bolo..."); if (!SR) recordLoop(); }
     else stopLive();
@@ -684,6 +1008,7 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
     e.preventDefault();
     const inp = $("#msg"); const t = inp.value.trim(); inp.value = "";
     if (!t) return;
+    if (cfg.mode === "realtime" && rt.active) { rt.sendText(t); return; }
     if (busy) interrupt();
     busy = false;
     runTurn(t, false);
@@ -698,7 +1023,31 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
 
   const selEngine = $("#selEngine"), selLang = $("#selLang");
   selEngine.value = cfg.engine; selLang.value = cfg.lang;
-  selEngine.addEventListener("change", () => { cfg.engine = selEngine.value; store.set("engine", cfg.engine); });
+  selEngine.addEventListener("change", () => { cfg.engine = selEngine.value; store.set("engine2", cfg.engine); });
+  const selMode = $("#selMode"), selPersona = $("#selPersona"), selTheme = $("#selTheme");
+  selMode.value = cfg.mode; selPersona.value = cfg.persona; selTheme.value = cfg.theme;
+  selMode.addEventListener("change", () => { store.set("mode", selMode.value); toast("Mode badal raha hoon..."); setTimeout(() => location.reload(), 600); });
+  selPersona.addEventListener("change", () => { cfg.persona = selPersona.value; store.set("persona", cfg.persona); toast("Agli baat-cheet se naya persona"); });
+  selTheme.addEventListener("change", () => { cfg.theme = selTheme.value; store.set("theme", cfg.theme); document.documentElement.dataset.theme = cfg.theme; });
+
+  // What Myra remembers about you (shared with the Telegram chat)
+  function loadFacts() {
+    fetch(api("memory")).then((r) => r.json()).then((d) => {
+      const ul = $("#facts"); ul.textContent = "";
+      const facts = d.facts || [];
+      if (!facts.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "Abhi kuch nahi"; ul.appendChild(li); return; }
+      for (const f of facts) { const li = document.createElement("li"); li.textContent = f; ul.appendChild(li); }
+    }).catch(() => {});
+  }
+  $("#forgetAll").addEventListener("click", async () => {
+    await fetch(api("memory/clear"), { method: "POST" }).catch(() => {});
+    loadFacts(); toast("Sab bhula diya");
+  });
+  loadFacts();
+
+  const selMic = $("#selMic");
+  selMic.value = cfg.mic;
+  selMic.addEventListener("change", () => { store.set("mic", selMic.value); toast("Mic mode badal raha hoon..."); setTimeout(() => location.reload(), 600); });
   selLang.addEventListener("change", () => {
     cfg.lang = selLang.value; store.set("lang", cfg.lang);
     if (live && SR) { stopRecognition(); wantRecog = true; startRecognition(); }
@@ -727,7 +1076,37 @@ select{font:inherit;font-size:15px;padding:12px 12px;border-radius:var(--r-sm);b
     btn.disabled = false; btn.textContent = "Preview voice";
   });
 
-  if (!SR) $("#modelNote").textContent += " (Is browser mein live speech recognition nahi, recorder mode use hoga. Chrome best hai.)";
+  /* ---------- Gemini key gate: blocks the page until a key is saved to the shared pool ---------- */
+  (() => {
+    const gate = $("#keygate"), form = $("#kgForm"), input = $("#kgKey"), err = $("#kgErr"), btn = $("#kgBtn");
+    let done = false;
+    try { done = localStorage.getItem("myra.keyok") === "1"; } catch {}
+    if (done) return;
+    gate.hidden = false;
+    const lock = (on) => [...app.children].forEach((c) => c !== gate && c.toggleAttribute("inert", on));
+    lock(true);
+    setTimeout(() => input.focus(), 50);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      err.textContent = "";
+      btn.disabled = true; btn.textContent = "Check ho rahi hai...";
+      try {
+        const r = await fetch(api("gemini-key"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: input.value.trim() }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || !d.ok) throw new Error(d.error || "Key save nahi hui, dobara try karo");
+        input.value = "";
+        try { localStorage.setItem("myra.keyok", "1"); } catch {}
+        gate.hidden = true;
+        lock(false);
+        toast(d.added ? "Key save ho gayi, shukriya! Ab sab users ke liye use hogi" : "Ye key pehle se saved hai");
+      } catch (ex) {
+        err.textContent = ex.message || "Kuch gadbad hui";
+      }
+      btn.disabled = false; btn.textContent = "Save karo";
+    });
+  })();
+
+  if (cfg.mic === "browser" && !SR) $("#modelNote").textContent += " (Is browser mein live speech recognition nahi, recorder mode use hoga. Chrome best hai.)";
 })();
 </script>
 </body>
