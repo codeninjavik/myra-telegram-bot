@@ -5,7 +5,8 @@ import { getJSON, setJSON } from "./store.js";
 
 // ---------- Settings (persisted per chat) ----------
 export type ChatCfg = {
-  antilink: boolean;
+  antilink: boolean; // legacy flag, no longer used: it was switched on by default in every group
+  linkFilter?: boolean; // links are deleted only when a group admin switched this on with /antilink on (default off)
   antiabuse: boolean;
   antiflood: boolean;
   warnLimit: number;
@@ -40,7 +41,7 @@ const loaded = new Map<string, ChatCfg>();
 async function loadCfg(chatId: number) {
   const k = String(chatId);
   loaded.set(k, (await getJSON<ChatCfg>(`m/${k}`)) ?? {
-    antilink: true, antiabuse: true, antiflood: true, warnLimit: 3, action: "ban",
+    antilink: false, antiabuse: true, antiflood: true, warnLimit: 3, action: "ban",
     badwords: [...DEFAULT_BADWORDS], welcome: true, rules: "", warns: {},
   });
 }
@@ -342,7 +343,7 @@ async function autoMod(ctx: Context): Promise<boolean> {
       return true;
     }
   }
-  if (c.antilink && URL_RE.test(text)) {
+  if (c.linkFilter === true && URL_RE.test(text)) {
     await del();
     await addWarn(ctx, ctx.from.id, name, "links allowed nahi hain");
     return true;
@@ -588,7 +589,7 @@ export function registerModeration(bot: Bot) {
   });
 
   for (const [name, key, label] of [
-    ["antilink", "antilink", "Link filter"],
+    ["antilink", "linkFilter", "Link filter (links delete honge)"],
     ["antiabuse", "antiabuse", "Gaali filter"],
     ["antiflood", "antiflood", "Spam/flood filter"],
     ["welcome", "welcome", "Welcome message"],
@@ -668,7 +669,7 @@ export function registerModeration(bot: Bot) {
     const c = cfg(ctx.chat!.id);
     const f = (b: boolean) => (b ? "ON ✅" : "OFF ❌");
     await ctx.reply(
-      `⚙️ Moderation settings\n\nLink filter: ${f(c.antilink)}\nGaali filter: ${f(c.antiabuse)}\nSpam filter: ${f(c.antiflood)}\nWelcome: ${f(c.welcome)}\nWarn limit: ${c.warnLimit}\nLimit par action: ${c.action}\nBanned words: ${c.badwords.length}`,
+      `⚙️ Moderation settings\n\nLink filter: ${f(c.linkFilter === true)} (links ${c.linkFilter === true ? "delete hote hain" : "allowed hain"})\nGaali filter: ${f(c.antiabuse)}\nSpam filter: ${f(c.antiflood)}\nWelcome: ${f(c.welcome)}\nWarn limit: ${c.warnLimit}\nLimit par action: ${c.action}\nBanned words: ${c.badwords.length}`,
     );
   });
 }

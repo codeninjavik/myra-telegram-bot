@@ -130,7 +130,7 @@ bot.command("modhelp", (ctx) =>
   ctx.reply(
     "👮 Moderation commands (sirf group admins, bot ko admin banana zaroori):\n\n" +
       MOD_MENU.map((m) => `/${m.command} - ${m.description}`).join("\n") +
-      "\n\nAuto-mod: link, gaali aur spam wale msg delete hote hain, warn milta hai, limit par ban/mute.",
+      "\n\nAuto-mod: gaali aur spam wale msg delete hote hain, warn milta hai, limit par ban/mute. Links default mein allowed hain; delete karwane ke liye group admin /antilink on kare.",
   ),
 );
 
